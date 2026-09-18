@@ -141,7 +141,14 @@ def schema_text(con, tables: dict[str, pd.DataFrame]) -> str:
 
 
 def join_hints(con, tables: dict[str, pd.DataFrame]) -> list[str]:
-    """Columns that share a name AND actual values across two tables.
+    """Columns that look like a key shared by two tables.
+
+    Two tests, both needed. Values must overlap: a name match alone invents
+    joins on generic columns like `id`. And the column must be near-unique on
+    at least one side: a shared category such as `leave_type` or `department`
+    overlaps perfectly in every table that has it, yet joining on it fans rows
+    out instead of linking them. Uniqueness is what separates a key from a
+    label, and only the key belongs in the prompt.
 
     The overlap is computed in DuckDB over the full columns. Sampling the first
     N distinct values in pandas looked equivalent and was not: on a large table
@@ -162,7 +169,10 @@ def join_hints(con, tables: dict[str, pd.DataFrame]) -> list[str]:
                     ''').fetchone()
                 except duckdb.Error:  # same name, incompatible types — not a join key
                     continue
-                if na and nb and shared / min(na, nb) > 0.3:
+                if not (na and nb) or shared / min(na, nb) <= 0.3:
+                    continue
+                unique = max(na / max(len(tables[a]), 1), nb / max(len(tables[b]), 1))
+                if unique > 0.3:  # a key identifies rows; a category repeats across them
                     hints.append(f"{a}.{col} = {b}.{col}")
     return hints
 
