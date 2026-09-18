@@ -140,15 +140,29 @@ def schema_text(con, tables: dict[str, pd.DataFrame]) -> str:
     return "\n\n".join(blocks)
 
 
-def join_hints(tables: dict[str, pd.DataFrame]) -> list[str]:
-    """Columns that share a name AND actual values across two tables."""
+def join_hints(con, tables: dict[str, pd.DataFrame]) -> list[str]:
+    """Columns that share a name AND actual values across two tables.
+
+    The overlap is computed in DuckDB over the full columns. Sampling the first
+    N distinct values in pandas looked equivalent and was not: on a large table
+    the head of one column and the head of the other need not intersect at all,
+    so real joins went undetected exactly when they mattered most.
+    """
     hints, names = [], list(tables)
     for i, a in enumerate(names):
         for b in names[i + 1:]:
-            for col in set(tables[a].columns) & set(tables[b].columns):
-                va = set(pd.unique(tables[a][col].dropna())[:500])
-                vb = set(pd.unique(tables[b][col].dropna())[:500])
-                if va and vb and len(va & vb) / min(len(va), len(vb)) > 0.3:
+            for col in sorted(set(tables[a].columns) & set(tables[b].columns)):
+                try:
+                    na, nb, shared = con.execute(f'''
+                        WITH x AS (SELECT DISTINCT "{col}" v FROM "{a}" WHERE "{col}" IS NOT NULL),
+                             y AS (SELECT DISTINCT "{col}" v FROM "{b}" WHERE "{col}" IS NOT NULL)
+                        SELECT (SELECT count(*) FROM x),
+                               (SELECT count(*) FROM y),
+                               (SELECT count(*) FROM x JOIN y USING (v))
+                    ''').fetchone()
+                except duckdb.Error:  # same name, incompatible types — not a join key
+                    continue
+                if na and nb and shared / min(na, nb) > 0.3:
                     hints.append(f"{a}.{col} = {b}.{col}")
     return hints
 
@@ -161,7 +175,7 @@ def extract_sql(reply: str) -> str:
 # --- ask --------------------------------------------------------------------
 def ask(question: str, tables: dict[str, pd.DataFrame], con):
     """-> (sql, message, result_df). Exactly one of message/result_df is set."""
-    hints = join_hints(tables)
+    hints = join_hints(con, tables)
     context = schema_text(con, tables)
     if hints:
         context += "\n\nLikely join keys:\n" + "\n".join(f"  {h}" for h in hints)
@@ -249,9 +263,10 @@ def main() -> None:
         if upload.name in st.session_state.loaded:
             continue
         try:
-            for name, df in load(upload).items():
-                register(con, name, df)
-                tables[name] = df
+            with st.spinner(f"Reading {upload.name}…"):  # a large file takes seconds
+                for name, df in load(upload).items():
+                    register(con, name, df)
+                    tables[name] = df
             st.session_state.loaded.add(upload.name)
         except Exception as e:  # noqa: BLE001 - a bad file shouldn't kill the session
             st.error(f"Could not read {upload.name}: {e}")
@@ -265,7 +280,7 @@ def main() -> None:
         for name, df in tables.items():
             with st.expander(f"{name} · {len(df):,} rows"):
                 st.dataframe(df.head(20), use_container_width=True)
-        for hint in join_hints(tables):
+        for hint in join_hints(con, tables):
             st.caption(f"🔗 {hint}")
 
     question = st.text_input(
