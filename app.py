@@ -14,12 +14,14 @@ from openai import OpenAI
 
 load_dotenv()
 
-# --- model config: any OpenAI-compatible endpoint, swap via env -------------
-# Default is OpenAI for local testing. The assignment requires an open-weight
-# model at submission time — flip LLM_BASE_URL/LLM_MODEL, no code change.
-MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
-BASE_URL = os.getenv("LLM_BASE_URL", "https://api.openai.com/v1")
-API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY", "")
+# --- model config: open-weight by default, swap via env ---------------------
+# Qwen 2.5 Coder (Apache-2.0) on a local Ollama: nothing leaves the machine and
+# no key is needed. Any OpenAI-compatible endpoint works — the `openai` package
+# here is only the client protocol, not a dependency on OpenAI the service.
+MODEL = os.getenv("LLM_MODEL", "qwen2.5-coder:latest")
+BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
+API_KEY = os.getenv("LLM_API_KEY", "")
+LOCAL = "localhost" in BASE_URL or "127.0.0.1" in BASE_URL
 
 SYSTEM = """You translate questions into DuckDB SQL over the tables described below.
 
@@ -289,7 +291,7 @@ def main() -> None:
         st.subheader("Loaded tables")
         for name, df in tables.items():
             with st.expander(f"{name} · {len(df):,} rows"):
-                st.dataframe(df.head(20), use_container_width=True)
+                st.dataframe(df.head(20), width="stretch")
         for hint in join_hints(con, tables):
             st.caption(f"🔗 {hint}")
 
@@ -299,7 +301,7 @@ def main() -> None:
     )
     if not question:
         return
-    if not API_KEY:
+    if not API_KEY and not LOCAL:
         st.error("Set `LLM_API_KEY` in your environment — see the README.")
         return
 
@@ -316,7 +318,7 @@ def main() -> None:
 
     st.success(f"{len(result):,} row{'s' if len(result) != 1 else ''}")
     render_chart(result)
-    st.dataframe(result, use_container_width=True)
+    st.dataframe(result, width="stretch")
     st.download_button("Download CSV", result.to_csv(index=False), "answer.csv", "text/csv")
 
 

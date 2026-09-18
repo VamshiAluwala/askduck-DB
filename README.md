@@ -18,13 +18,13 @@ engine, not a language model, and the query is on screen next to it.
 ## Run it
 
 ```bash
+ollama pull qwen2.5-coder          # open-weight model, runs locally
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-echo "OPENAI_API_KEY=sk-..." > .env    # or LLM_API_KEY for any other provider
 streamlit run app.py
 ```
 
-Opens at http://localhost:8501.
+Opens at http://localhost:8501. No API key required — the model runs on your machine.
 
 ## Questions to try
 
@@ -63,44 +63,40 @@ These assume an HR-style dataset — the shapes generalise to any upload.
 | UI | Streamlit | Upload widget, charts, dataframes free; hosts free on Community Cloud |
 | Engine | DuckDB (in-memory) | Cross-file joins for free, fast on a laptop, zero infra |
 | Loading | pandas + openpyxl | CSV and every Excel sheet, one table per sheet |
-| Model | `gpt-4o-mini` (default), or any open-weight model via env vars | One OpenAI-compatible client; provider is three env vars |
-| Config | python-dotenv | `.env` for keys, never committed |
+| Model | `qwen2.5-coder` on Ollama (Apache-2.0) | Open weights, runs locally, no key and no data leaves the machine |
+| Config | python-dotenv | Optional `.env` to point at a hosted provider; never committed |
 
 ## Swapping the model
 
-Any OpenAI-compatible endpoint. Three env vars, no code change:
+The default is open-weight and local. Nothing in the app knows which provider it is talking
+to — the `openai` package is only the client protocol, spoken by Ollama, Groq, OpenRouter and
+others alike. Two env vars move it, no code change:
 
 ```bash
-# OpenAI (current default)
-OPENAI_API_KEY=sk-...
+# Default: local Ollama, open weights, no key
+LLM_BASE_URL=http://localhost:11434/v1
+LLM_MODEL=qwen2.5-coder:latest
 
-# Groq — open-weight Llama, fast
-export LLM_BASE_URL=https://api.groq.com/openai/v1
-export LLM_MODEL=llama-3.3-70b-versatile
-export LLM_API_KEY=gsk_...
+# Groq — open-weight Llama, hosted and faster
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_MODEL=llama-3.3-70b-versatile
+LLM_API_KEY=gsk_...
 
-# OpenRouter — Qwen, DeepSeek, Mistral, etc.
-export LLM_BASE_URL=https://openrouter.ai/api/v1
-export LLM_MODEL=qwen/qwen-2.5-coder-32b-instruct
-export LLM_API_KEY=sk-or-...
-
-# Fully local via Ollama — no key needed
-export LLM_BASE_URL=http://localhost:11434/v1
-export LLM_MODEL=qwen2.5-coder:7b
-export LLM_API_KEY=unused
+# OpenRouter — Qwen, DeepSeek, Mistral
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=qwen/qwen-2.5-coder-32b-instruct
+LLM_API_KEY=sk-or-...
 ```
-
-> **On the open-source constraint:** the app is provider-agnostic by design — nothing in the
-> code knows which model it is talking to, and the three env vars above switch it to open-weight
-> Llama, Qwen or a fully local Ollama with no code change. The committed default is `gpt-4o-mini`
-> because that is what I had a key for while building; the Groq and Ollama paths above are the
-> open-weight configurations and are the intended production setup.
 
 ## Deploying
 
-Push to GitHub → [share.streamlit.io](https://share.streamlit.io) → point at `app.py` → add
-`LLM_API_KEY` under **Secrets**. Streamlit Cloud exposes secrets as environment variables, so
-nothing in the code changes.
+The default model is local, so the app runs entirely on your machine — that is the intended
+setup, and the demo recording shows it.
+
+To host it instead, a local Ollama is not reachable from a cloud runner, so point the app at a
+hosted open-weight provider: push to GitHub → [share.streamlit.io](https://share.streamlit.io)
+→ point at `app.py` → set `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY` under **Secrets**.
+Streamlit Cloud exposes secrets as environment variables, so nothing in the code changes.
 
 ## How it works
 
