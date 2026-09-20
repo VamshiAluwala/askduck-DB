@@ -2,5 +2,6 @@ streamlit>=1.64
 duckdb>=1.1
 pandas>=2.2
 openpyxl>=3.1
+xlrd>=2.0.1
 groq>=0.11
 python-dotenv>=1.0
