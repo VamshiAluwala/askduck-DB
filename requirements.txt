@@ -1,4 +1,4 @@
-streamlit>=1.40
+streamlit>=1.64
 duckdb>=1.1
 pandas>=2.2
 openpyxl>=3.1

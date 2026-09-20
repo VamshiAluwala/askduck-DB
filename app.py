@@ -263,21 +263,123 @@ def render_chart(df: pd.DataFrame) -> None:
     (st.line_chart if kind == "line" else st.bar_chart)(df.set_index(x)[values])
 
 
+
+# --- ui chrome --------------------------------------------------------------
+THEME = """
+<style>
+  :root { --db-ink:#1a1633; --db-violet:#5b3df5; --db-mute:#6b6880; }
+  .block-container { padding-top: 2.2rem; max-width: 1180px; }
+  #MainMenu, footer { visibility: hidden; }
+
+  .db-hero {
+    background: linear-gradient(120deg, #4c2fd6 0%, #7a4ff7 55%, #9d6bff 100%);
+    border-radius: 16px; padding: 1.6rem 1.8rem; margin-bottom: 1.4rem;
+    color: #fff; box-shadow: 0 10px 28px rgba(76,47,214,.22);
+  }
+  .db-hero h1 { margin:0; font-size:1.85rem; font-weight:700; letter-spacing:-.4px; }
+  .db-hero p  { margin:.45rem 0 0; opacity:.92; font-size:.97rem; }
+  .db-tag {
+    display:inline-block; margin-bottom:.7rem; padding:.2rem .7rem; border-radius:999px;
+    background:rgba(255,255,255,.18); font-size:.72rem; font-weight:600;
+    letter-spacing:.06em; text-transform:uppercase;
+  }
+  .db-card {
+    border:1px solid #e7e4f2; border-radius:12px; padding:1rem 1.1rem;
+    background:#fff; height:100%;
+  }
+  .db-card h4 { margin:0 0 .3rem; font-size:.9rem; color:var(--db-ink); }
+  .db-card p  { margin:0; font-size:.82rem; color:var(--db-mute); line-height:1.45; }
+  .db-pill {
+    display:inline-block; padding:.18rem .6rem; border-radius:999px;
+    background:#efecff; color:var(--db-violet); font-size:.74rem; font-weight:600;
+  }
+  .stButton>button {
+    border-radius:999px; border:1px solid #e0dcf5; background:#f8f7ff;
+    color:var(--db-ink); font-size:.82rem; padding:.3rem .85rem; font-weight:500;
+  }
+  .stButton>button:hover { border-color:var(--db-violet); color:var(--db-violet); }
+  .db-foot { text-align:center; color:var(--db-mute); font-size:.78rem; margin-top:2.5rem; }
+  @media (prefers-color-scheme: dark) {
+    .db-card { background:#1c1b26; border-color:#332f45; }
+    .db-card h4 { color:#ece9ff; }
+    .db-pill { background:#2a2540; }
+    .stButton>button { background:#1c1b26; border-color:#332f45; color:#ddd9ef; }
+  }
+</style>
+"""
+
+HERO = """
+<div class="db-hero">
+  <span class="db-tag">Darwinbox · Forward Deployed Engineer take-home</span>
+  <h1>Ask your spreadsheets</h1>
+  <p>Upload CSV or Excel files and ask in plain English. The model writes the SQL,
+     DuckDB computes the answer — and the query stays on screen so you can check it.</p>
+</div>
+"""
+
+EXAMPLES = [
+    "What is the average CTC by department?",
+    "Which departments have the highest average performance rating?",
+    "How many employees joined each year?",
+    "How many leave days were approved per leave type?",
+    "Which department has the highest attrition rate?",
+]
+
+
+def intro_cards() -> None:
+    """Three cards explaining the design, shown before anything is uploaded."""
+    cards = [
+        ("🧮 The model never does the maths",
+         "It only translates your question into SQL. Every number on screen came out of "
+         "DuckDB, not a language model."),
+        ("🔗 Files are linked automatically",
+         "Shared columns are matched on real overlapping values and checked for uniqueness, "
+         "so a category is never mistaken for a key."),
+        ("🔍 Nothing is a black box",
+         "The generated SQL sits next to every answer. Out-of-scope questions are refused "
+         "rather than guessed at."),
+    ]
+    for col, (head, body) in zip(st.columns(3), cards):
+        col.markdown(f'<div class="db-card"><h4>{head}</h4><p>{body}</p></div>',
+                     unsafe_allow_html=True)
+
+
 # --- ui ---------------------------------------------------------------------
 def main() -> None:
-    st.set_page_config(page_title="Data Q&A", page_icon="📊", layout="wide")
-    st.title("📊 Ask your spreadsheets")
-    st.caption(f"Model writes the SQL · DuckDB computes the answer · `{MODEL}`")
+    st.set_page_config(page_title="Ask your spreadsheets", page_icon="📊", layout="wide")
+    st.markdown(THEME, unsafe_allow_html=True)
+    st.markdown(HERO, unsafe_allow_html=True)
 
     if "con" not in st.session_state:
         st.session_state.con = duckdb.connect(":memory:")
         st.session_state.tables = {}
         st.session_state.loaded = set()
+        st.session_state.question = ""
 
     con, tables = st.session_state.con, st.session_state.tables
 
+    with st.sidebar:
+        st.markdown(f'<span class="db-pill">{MODEL}</span>', unsafe_allow_html=True)
+        st.caption("Open weights (Apache-2.0), served by Groq. The model writes SQL; "
+                   "DuckDB runs it.")
+        st.divider()
+        if tables:
+            st.subheader("Loaded tables")
+            for name, df in tables.items():
+                with st.expander(f"{name} · {len(df):,} rows"):
+                    st.dataframe(df.head(20), width="stretch")
+            hints = join_hints(con, tables)
+            if hints:
+                st.subheader("Detected links")
+                for hint in hints:
+                    st.caption(f"🔗 {hint}")
+        else:
+            st.caption("No files loaded yet.")
+
     uploads = st.file_uploader(
-        "Upload CSV or Excel files", type=["csv", "xlsx", "xls"], accept_multiple_files=True
+        "Upload CSV or Excel files", type=["csv", "xlsx", "xls"],
+        accept_multiple_files=True,
+        help="Every sheet in an Excel workbook becomes its own table.",
     )
     for upload in uploads or []:
         if upload.name in st.session_state.loaded:
@@ -292,21 +394,24 @@ def main() -> None:
             st.error(f"Could not read {upload.name}: {e}")
 
     if not tables:
-        st.info("Upload at least one CSV or Excel file to get started.")
+        st.markdown("###### How it works")
+        intro_cards()
         return
 
-    with st.sidebar:
-        st.subheader("Loaded tables")
-        for name, df in tables.items():
-            with st.expander(f"{name} · {len(df):,} rows"):
-                st.dataframe(df.head(20), width="stretch")
-        for hint in join_hints(con, tables):
-            st.caption(f"🔗 {hint}")
+    rows = sum(len(df) for df in tables.values())
+    a, b, c = st.columns(3)
+    a.metric("Files", len(st.session_state.loaded))
+    b.metric("Tables", len(tables))
+    c.metric("Rows", f"{rows:,}")
 
-    question = st.text_input(
-        "Your question",
-        placeholder="Which region had the highest total order value?",
-    )
+    st.markdown("###### Try one")
+    for col, example in zip(st.columns(len(EXAMPLES)), EXAMPLES):
+        if col.button(example, key=f"ex_{example}", width="stretch"):
+            st.session_state.question = example
+            st.rerun()
+
+    question = st.text_input("Your question", key="question",
+                             placeholder="Ask anything about the uploaded files…")
     if not question:
         return
     if not API_KEY:
@@ -331,7 +436,11 @@ def main() -> None:
     st.success(f"{len(result):,} row{'s' if len(result) != 1 else ''}")
     render_chart(result)
     st.dataframe(result, width="stretch")
-    st.download_button("Download CSV", result.to_csv(index=False), "answer.csv", "text/csv")
+    st.download_button("⬇ Download CSV", result.to_csv(index=False), "answer.csv", "text/csv")
+
+    st.markdown('<div class="db-foot">Built for the Darwinbox Forward Deployed Engineer '
+                'take-home · Streamlit · DuckDB · open-weight LLM</div>',
+                unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
