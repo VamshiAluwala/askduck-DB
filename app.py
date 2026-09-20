@@ -44,8 +44,12 @@ Rules:
   column, or the question is about something outside these tables entirely.
 - Prefer the obvious reading over asking. "Revenue", "sales" and "spend" mean SUM of the
   amount-like column; "compare X and Y" means group by that column and total it.
-- Reply CLARIFY: <one short question> only when no defensible default exists — "best",
-  "top performer", "how are we doing" name no metric at all.
+- Reply CLARIFY: <one short question> when the question asks you to rank, compare or pick a
+  winner without naming the measure — "best", "worst", "top performer", "strongest", "who
+  should we promote", "how are we doing". This holds even when a plausible column exists:
+  several columns could rank the same rows, and silently choosing one is a guess presented as
+  an answer. Ask which measure to use. The exception above still applies to named metrics —
+  "highest average rating" or "most leave taken" say what to rank by, so answer those.
 - Never use CANNOT_ANSWER for a value you simply did not see in the sample rows; the listed
   distinct values are authoritative.
 """
@@ -317,13 +321,34 @@ HERO = """
 </div>
 """
 
-EXAMPLES = [
-    "What is the average CTC by department?",
-    "Which departments have the highest average performance rating?",
-    "How many employees joined each year?",
-    "How many leave days were approved per leave type?",
-    "Which department has the highest attrition rate?",
-]
+SUGGEST = """You suggest questions a business user could ask of the tables below.
+
+Rules:
+- Exactly {n} questions, one per line, no numbering and no other text.
+- Each must be answerable from these columns alone. Never invent a column.
+- Phrase them the way a manager would, using the data's own vocabulary, not column names.
+- Vary them: one plain total or count, one grouped average, one comparison or ranking.
+- If a date column exists, include one question about a trend over time. Never say "last year"
+  or "recently" — the data may be old. Name the period from the sample rows, or say "each year".
+- If two tables share a key, include one that needs both.
+- Keep each under 12 words.
+"""
+
+
+def suggest_questions(con, tables: dict[str, pd.DataFrame], n: int = 5) -> list[str]:
+    """Example questions for the data actually loaded, not a canned HR list."""
+    context = schema_text(con, tables)
+    if hints := join_hints(con, tables):
+        context += "\n\nShared keys:\n" + "\n".join(f"  {h}" for h in hints)
+    reply = Groq(api_key=API_KEY).chat.completions.create(
+        model=MODEL, temperature=0.3,
+        messages=[{"role": "system", "content": SUGGEST.format(n=n)},
+                  {"role": "user", "content": context}],
+    ).choices[0].message.content
+    lines = [re.sub(r"^\s*[-*\d.)]+\s*", "", ln).strip(' "') for ln in reply.splitlines()]
+    # dict.fromkeys dedupes and keeps order: two identical suggestions would collide
+    # on the button key and take the page down with them.
+    return list(dict.fromkeys(ln for ln in lines if ln.endswith("?")))[:n]
 
 
 def intro_cards() -> None:
@@ -404,11 +429,24 @@ def main() -> None:
     b.metric("Tables", len(tables))
     c.metric("Rows", f"{rows:,}")
 
-    st.markdown("###### Try one")
-    for col, example in zip(st.columns(len(EXAMPLES)), EXAMPLES):
-        if col.button(example, key=f"ex_{example}", width="stretch"):
-            st.session_state.question = example
-            st.rerun()
+    # Suggestions are derived from the loaded schema, so they change with the data.
+    # Cached against the table names: asking again on every rerun would be one
+    # pointless model call per click.
+    signature = tuple(sorted(tables))
+    if API_KEY and st.session_state.get("suggest_for") != signature:
+        with st.spinner("Reading the schema…"):
+            try:
+                st.session_state.suggestions = suggest_questions(con, tables)
+            except GroqError:
+                st.session_state.suggestions = []
+        st.session_state.suggest_for = signature
+
+    if suggestions := st.session_state.get("suggestions"):
+        st.markdown("###### Try one — generated from your data")
+        for col, example in zip(st.columns(len(suggestions)), suggestions):
+            if col.button(example, key=f"ex_{example}", width="stretch"):
+                st.session_state.question = example
+                st.rerun()
 
     question = st.text_input("Your question", key="question",
                              placeholder="Ask anything about the uploaded files…")
