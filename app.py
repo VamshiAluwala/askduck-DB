@@ -10,18 +10,26 @@ import duckdb
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
-from openai import OpenAI
+from groq import Groq, GroqError
 
 load_dotenv()
 
-# --- model config: open-weight by default, swap via env ---------------------
-# Qwen 2.5 Coder (Apache-2.0) on a local Ollama: nothing leaves the machine and
-# no key is needed. Any OpenAI-compatible endpoint works — the `openai` package
-# here is only the client protocol, not a dependency on OpenAI the service.
-MODEL = os.getenv("LLM_MODEL", "qwen2.5-coder:latest")
-BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1")
-API_KEY = os.getenv("LLM_API_KEY", "")
-LOCAL = "localhost" in BASE_URL or "127.0.0.1" in BASE_URL
+# --- model config -----------------------------------------------------------
+# GPT-OSS 120B on Groq: open weights (Apache-2.0), ~1s per answer. The key comes
+# environment locally and from Streamlit secrets when deployed; swap LLM_MODEL
+# for any other model Groq serves without touching the code.
+def setting(name: str, default: str = "") -> str:
+    """Environment first, then Streamlit secrets, then the default."""
+    if value := os.getenv(name):
+        return value
+    try:
+        return st.secrets[name]
+    except Exception:  # no secrets file, or key absent
+        return default
+
+
+MODEL = setting("LLM_MODEL", "openai/gpt-oss-120b")
+API_KEY = setting("GROQ_API_KEY") or setting("LLM_API_KEY")
 
 SYSTEM = """You translate questions into DuckDB SQL over the tables described below.
 
@@ -192,7 +200,7 @@ def ask(question: str, tables: dict[str, pd.DataFrame], con):
     if hints:
         context += "\n\nLikely join keys:\n" + "\n".join(f"  {h}" for h in hints)
 
-    client = OpenAI(api_key=API_KEY or "unused", base_url=BASE_URL)
+    client = Groq(api_key=API_KEY)
     messages = [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": f"{context}\n\nQuestion: {question}"},
@@ -301,12 +309,16 @@ def main() -> None:
     )
     if not question:
         return
-    if not API_KEY and not LOCAL:
-        st.error("Set `LLM_API_KEY` in your environment — see the README.")
+    if not API_KEY:
+        st.error("Set `GROQ_API_KEY` — in `.env` locally, or Streamlit secrets when deployed.")
         return
 
     with st.spinner("Thinking…"):
-        sql, message, result = ask(question, tables, con)
+        try:
+            sql, message, result = ask(question, tables, con)
+        except GroqError as e:  # bad key, rate limit, network
+            st.error(f"Groq call failed — {e}")
+            return
 
     if message:
         st.warning(message)

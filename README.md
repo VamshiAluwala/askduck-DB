@@ -18,13 +18,13 @@ engine, not a language model, and the query is on screen next to it.
 ## Run it
 
 ```bash
-ollama pull qwen2.5-coder          # open-weight model, runs locally
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+echo "GROQ_API_KEY=gsk_..." > .env     # free key: console.groq.com/keys
 streamlit run app.py
 ```
 
-Opens at http://localhost:8501. No API key required — the model runs on your machine.
+Opens at http://localhost:8501.
 
 ## Questions to try
 
@@ -63,40 +63,22 @@ These assume an HR-style dataset — the shapes generalise to any upload.
 | UI | Streamlit | Upload widget, charts, dataframes free; hosts free on Community Cloud |
 | Engine | DuckDB (in-memory) | Cross-file joins for free, fast on a laptop, zero infra |
 | Loading | pandas + openpyxl | CSV and every Excel sheet, one table per sheet |
-| Model | `qwen2.5-coder` on Ollama (Apache-2.0) | Open weights, runs locally, no key and no data leaves the machine |
-| Config | python-dotenv | Optional `.env` to point at a hosted provider; never committed |
+| Model | GPT-OSS 120B on Groq | Open weights (Apache-2.0), ~1s per answer |
+| Config | python-dotenv | `.env` for the key locally, Streamlit secrets when deployed; never committed |
 
 ## Swapping the model
 
-The default is open-weight and local. Nothing in the app knows which provider it is talking
-to — the `openai` package is only the client protocol, spoken by Ollama, Groq, OpenRouter and
-others alike. Two env vars move it, no code change:
-
-```bash
-# Default: local Ollama, open weights, no key
-LLM_BASE_URL=http://localhost:11434/v1
-LLM_MODEL=qwen2.5-coder:latest
-
-# Groq — open-weight Llama, hosted and faster
-LLM_BASE_URL=https://api.groq.com/openai/v1
-LLM_MODEL=llama-3.3-70b-versatile
-LLM_API_KEY=gsk_...
-
-# OpenRouter — Qwen, DeepSeek, Mistral
-LLM_BASE_URL=https://openrouter.ai/api/v1
-LLM_MODEL=qwen/qwen-2.5-coder-32b-instruct
-LLM_API_KEY=sk-or-...
-```
+`LLM_MODEL` takes any model Groq serves. The default is `openai/gpt-oss-120b`; `openai/gpt-oss-20b`
+is faster and cheaper. Both are open weights under Apache-2.0 — the `openai/` prefix names the
+model family, not a hosted OpenAI service. Groq's Llama models need an enterprise plan.
 
 ## Deploying
 
-The default model is local, so the app runs entirely on your machine — that is the intended
-setup, and the demo recording shows it.
+Live at **https://darwinbox-task.streamlit.app**
 
-To host it instead, a local Ollama is not reachable from a cloud runner, so point the app at a
-hosted open-weight provider: push to GitHub → [share.streamlit.io](https://share.streamlit.io)
-→ point at `app.py` → set `LLM_BASE_URL`, `LLM_MODEL` and `LLM_API_KEY` under **Secrets**.
-Streamlit Cloud exposes secrets as environment variables, so nothing in the code changes.
+Push to GitHub → [share.streamlit.io](https://share.streamlit.io) → point at `app.py` → add
+`GROQ_API_KEY` under **Secrets**. Nothing in the code changes: the app reads the key from the
+environment locally and from Streamlit secrets when deployed.
 
 ## How it works
 
